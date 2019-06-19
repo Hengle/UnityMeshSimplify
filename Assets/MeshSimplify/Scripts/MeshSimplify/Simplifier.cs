@@ -179,7 +179,7 @@ namespace Chaos
 
             Vector2[] av2Mapping = _meshOriginal.uv;
 
-            AddVertices(sourceMesh.vertices, worldVertices);
+            AddVertices(sourceMesh.vertices, worldVertices, sourceMesh);
 
             int nTriangles = 0;
             //                ListIndices[] faceList = m_meshUniqueVertices.SubmeshesFaceList;
@@ -243,6 +243,7 @@ namespace Chaos
             //Stopwatch sw = Stopwatch.StartNew();
 
             int vertexNum = _listVertices.Count;
+
             while (vertexNum-- > 0)
             {
                 //               if (progress != null && ((vertexNum & 0xFF) == 0))
@@ -541,6 +542,47 @@ namespace Chaos
                 }
             }
 
+            if (bNormal)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    _normalsIn[i] = _normalsIn[i] * 0.1f;// Vector3.zero;
+                }
+                //int[] normalDiv = new int[n];
+                for (int i = 0; i < subMeshCount; i++)
+                {
+                    int[] triangles = _subMeshes[i];
+                    for (int j = 0; j < _triangleCount[i]; j+=3)
+                    {
+                        int i0 = triangles[j];
+                        int i1 = triangles[j + 1];
+                        int i2 = triangles[j + 2];
+                        Vector3 v0 = _vertices[i0];
+                        Vector3 v1 = _vertices[i1];
+                        Vector3 v2 = _vertices[i2];
+
+                        Vector3 normal = Vector3.Cross((v1 - v0), (v2 - v1));//.normalized;
+                        //if (Vector3.Dot(normal, _normalsIn[i0]) < 0 && Vector3.Dot(normal, _normalsIn[i1]) < 0 && Vector3.Dot(normal, _normalsIn[i2]) < 0)
+                        //{
+                        //    normal = -normal;
+                        //    triangles[j] = i2;
+                        //    triangles[j + 2] = i0;
+                        //}
+                        _normalsIn[i0] += normal;
+                        _normalsIn[i1] += normal;
+                        _normalsIn[i2] += normal;
+                        //normalDiv[i0]++;
+                        //normalDiv[i1]++;
+                        //normalDiv[i2]++;
+                    }
+                }
+                for (int i = 0; i < n; i++)
+                {
+                    //_normalsIn[i] /= normalDiv[i];
+                    _normalsIn[i] = _normalsIn[i].normalized;
+                }
+            }
+
             this._meshOut = meshOut;
 
             _assignVertices = _assignVertices ?? (arr => this._meshOut.vertices = arr);
@@ -590,41 +632,47 @@ namespace Chaos
             int i;
             float fEdgeLength = bUseEdgeLength ? (Vector3.Magnitude(v.Position - u.Position) / _originalMeshSize) : 1.0f;
             float fCurvature = 0.001f;
-
-            List<Triangle> sides = new List<Triangle>();
-
-            for (i = 0; i < u.ListFaces.Count; i++)
+            if (fEdgeLength < float.Epsilon)
             {
-                if (u.ListFaces[i].HasVertex(v))
-                {
-                    sides.Add(u.ListFaces[i]);
-                }
+                return fBorderCurvature * (1 - Vector3.Dot(u.Normal, v.Normal) + 2 * Vector3.Distance(u.UV, v.UV));
             }
-
-            if (bUseCurvature)
+            else
             {
+                List<Triangle> sides = new List<Triangle>();
+
                 for (i = 0; i < u.ListFaces.Count; i++)
                 {
-                    float fMinCurv = 1.0f;
-
-                    for (int j = 0; j < sides.Count; j++)
+                    if (u.ListFaces[i].HasVertex(v))
                     {
-                        float dotprod = Vector3.Dot(u.ListFaces[i].Normal, sides[j].Normal);
-                        fMinCurv = Mathf.Min(fMinCurv, (1.0f - dotprod) / 2.0f);
+                        sides.Add(u.ListFaces[i]);
                     }
-
-                    fCurvature = Mathf.Max(fCurvature, fMinCurv);
                 }
-            }
-            bool isBorder = u.IsBorder();
-            if (isBorder && sides.Count > 1)
-            {
-                fCurvature = 1.0f;
-            }
 
-            if (fBorderCurvature > 1 && isBorder)
-            {
-                fCurvature = fBorderCurvature;
+                if (bUseCurvature)
+                {
+                    for (i = 0; i < u.ListFaces.Count; i++)
+                    {
+                        float fMinCurv = 1.0f;
+
+                        for (int j = 0; j < sides.Count; j++)
+                        {
+                            float dotprod = Vector3.Dot(u.ListFaces[i].Normal, sides[j].Normal);
+                            fMinCurv = Mathf.Min(fMinCurv, (1.0f - dotprod) / 2.0f);
+                        }
+
+                        fCurvature = Mathf.Max(fCurvature, fMinCurv);
+                    }
+                }
+                bool isBorder = u.IsBorder();
+                if (isBorder && sides.Count > 1)
+                {
+                    fCurvature = 1.0f;
+                }
+
+                if (fBorderCurvature > 1 && isBorder)
+                {
+                    fCurvature = fBorderCurvature;
+                }
             }
 
             fCurvature += fRelevanceBias;
@@ -764,11 +812,22 @@ namespace Chaos
             }
         }
 
-        void AddVertices(Vector3[] listVertices, Vector3[] listVerticesWorld)
+        void AddVertices(Vector3[] listVertices, Vector3[] listVerticesWorld, Mesh mesh)
         {
+            Vector2[] uvs = mesh.uv;
+            Vector3[] normals = mesh.normals;
             for (int i = 0; i < listVertices.Length; i++)
             {
-                Vertex v = new Vertex(listVertices[i], listVerticesWorld[i], i);
+                Vertex v = new Vertex(listVertices[i], listVerticesWorld[i], i, uvs[i], normals[i]);
+                for (int j = 0; j < _listVertices.Count; j++)
+                {
+                    Vertex u = _listVertices[j];
+                    if (Vector3.Distance(v.Position, u.Position) / _originalMeshSize < float.Epsilon)
+                    {
+                        v.ListNeighbors.Add(u);
+                        u.ListNeighbors.Add(v);
+                    }
+                }
                 _listVertices.Add(v);
             }
         }

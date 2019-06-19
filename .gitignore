@@ -11,3 +11,6 @@ UnityPackageManager/
 *.sln
 *.user
 *.userprefs
+Assets/GitIgnore/
+Assets/GitIgnore.meta
+Logs/
